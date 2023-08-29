@@ -1,0 +1,416 @@
+# **Một số phương pháp thống kê**
+## Tiền xử lý dữ liệu
+### **Nhập dữ liệu**
+```{r}
+# Clear workspace: 
+rm(list = ls())
+
+# Load some packages for data manipulation: 
+library(tidyverse)
+library(dplyr)
+library(readxl)
+```
+
+```{r}
+# Import data: 
+### Import data from excel file
+setwd("E:/LECTURE DOC/FRM/QRM 2/data")
+dir()
+df<-read_excel("hmeq.xls")
+
+### Descriptive statistic
+  glimpse(df)
+  summary(df)
+```
+
+Xem biến trạng thái
+```{r rename to BAD}
+# rename y to BAD
+data <- df %>% dplyr::rename(BAD = BAD)
+table(data$BAD)
+```
+
+Bỏ các giá trị khác 0, 1:
+```{r}
+data <- data %>% subset(BAD == 0 | BAD == 1)
+table(data$BAD)
+```
+
+Đổi các biến về dạng factor:
+```{r}
+data <- data %>% 
+  mutate(across(c("REASON",
+         "JOB",
+         "DEROG",
+         "gDEBTINC",
+         "CLNO",
+         "DELINQ"), as.factor))
+```
+
+### Xử lý giá trị missing:
+
+- Kiểm tra giá trị missing:
+```{r}
+# Check NA
+# sapply(data, function(x) sum(is.na(x)))
+  colSums(is.na(data))
+```
+
+- Xóa bỏ các giá trị missing:
+```{r}
+### can drop them with the na.omit().
+  data.rm <- na.omit(data) # delete missing value
+  summary(data.rm)
+  sum(is.na(data.rm))
+```
+
+- Thay thế giá trị missing bằng giá trị mean hoặc median cho biến giá trị thực:
+```{r}
+  glimpse(data)
+  mean(data$VALUE, na.rm = TRUE)
+### or can replace them with mean
+  data <- data %>% mutate(VALUE = ifelse(is.na(VALUE), mean(VALUE, na.rm = TRUE), VALUE))
+### or can replace them with median
+  data <- data %>% mutate(MORTDUE = ifelse(is.na(MORTDUE), median(MORTDUE, na.rm = TRUE), MORTDUE))
+```
+
+Lập hàm để sử dụng cho nhiều biến:
+```{r}
+# Function replaces NA by mean: 
+replace_by_mean <- function(x) {
+  x[is.na(x)] <- mean(x, na.rm = TRUE)
+  return(x)
+}
+
+# A function imputes NA observations for categorical variables: 
+replace_na_categorical <- function(x) {
+  x %>% 
+    table() %>% 
+    as.data.frame() %>% 
+    arrange(-Freq) ->> my_df
+  
+  n_obs <- sum(my_df$Freq)
+  pop <- my_df$. %>% as.character()
+  set.seed(29)
+  x[is.na(x)] <- sample(pop, sum(is.na(x)), replace = TRUE, prob = my_df$Freq)
+  return(x)
+}
+```
+
+Thay thế cho các biến:
+```{r}
+# replace missing value         
+data <- data %>%
+        mutate_if(is.numeric, replace_by_mean) %>%
+        mutate(across(where(is.factor) & !BAD, replace_na_categorical))
+```
+
+Xem lại dữ liệu sau khi xử lý missing:
+```{r}
+glimpse(data)
+colSums(is.na(data))
+```
+```{r}
+# install.packages("ggpubr")
+library(ggpubr)
+library(patchwork)
+plot_Bad_REASON <- ggplot(data, aes(x = REASON, y = BAD)) +
+    stat_summary(fun.y = "sum", geom="bar", aes(width=0.5)) +
+    theme_pubclean()
+
+plot_Bad_JOB <- ggplot(data, aes(x = JOB, y = BAD)) +
+    stat_summary(fun.y = "sum", geom="bar", aes(width=0.5)) +
+    theme_bw()
+plot_Bad_REASON  + plot_Bad_JOB
+```
+
+```{r}
+a <- ggplot(data, aes(x = MORTDUE))
+a + geom_histogram(bins = 30, color = "black", fill = "gray") +
+  geom_vline(aes(xintercept = mean(MORTDUE)), 
+             linetype = "dashed", size = 0.6)
+```
+
+```{r}
+# Histogram with density plot
+a + geom_histogram(aes(y = ..density..), 
+                   colour="black", fill="white") +
+  geom_density(alpha = 0.2, fill = "#FF6666") 
+     
+# Color by groups
+a + geom_histogram(aes(y = ..density.., color = BAD),
+                   fill = "white",
+                   position = "identity")+
+  geom_density(aes(color = BAD), size = 1) +
+  scale_color_manual(values = c("#868686FF", "#EFC000FF"))
+```
+
+### Xử lý giá trị ngoại lai
+```{r}
+boxplot(data$MORTDUE)
+summary(data$MORTDUE)
+```
+
+Xem phân bố giá trị dữ liệu theo BAD:
+```{r}
+ggplot(data, aes(x = BAD, y = MORTDUE)) +
+  geom_boxplot() + theme_bw()
+```
+
+```{r}
+### Outliers handling
+minMORTDUE = quantile(data$MORTDUE, probs = 0.25) - 1.5*IQR(data$MORTDUE)
+maxMORTDUE = quantile(data$MORTDUE, probs = 0.75) + 1.5*IQR(data$MORTDUE)
+data$MORTDUE[data$MORTDUE > maxMORTDUE | data$MORTDUE < minMORTDUE] = mean(data$MORTDUE)
+```
+
+Sử dụng hàm:
+```{r}
+outlier_by_mean <- function(x){
+  Q <- quantile(x, probs=c(.25, .75), na.rm = FALSE)
+  Iqr = IQR(x)
+
+  above = Q[2] + 1.5*Iqr
+  below = Q[1] - 1.5*Iqr
+  x[x > above | x < below] <- mean(x, na.rm = TRUE)
+  return(x)
+}
+data <- data %>% mutate_if(is.numeric, outlier_by_mean)
+glimpse(data)
+```
+
+
+```{r}
+# library(patchwork)
+
+plot1 <- ggplot(data, aes(x = BAD, y = MORTDUE)) +
+  geom_boxplot() + theme_bw()
+
+plot2 <- ggplot(data, aes(x = MORTDUE, fill = BAD)) +
+  geom_density(alpha = 0.7) + theme_bw() +
+  theme(legend.position = c(0.8, 0.8))
+
+plot1 + plot2
+```
+
+### Scale data 
+- Chuẩn hóa biến định tính:
+
+```{r}
+# normalize 
+a <- data$MORTDUE
+scaled.a <- scale(a)
+
+head(a); head(scaled.a)
+# check that we get mean of 0 and sd of 1
+summary(scaled.a); sd(scaled.a)
+```
+<!-- colMeans(scaled.a)  # faster version of apply(scaled.a, 2, mean) -->
+<!-- apply(scaled.a, 2, sd) -->
+
+- Chuyển giá trị về đoạn [0, 1]:
+```{r}
+# convert to 0 - 1
+ZeroOne <- function(x) {
+  m <- min(x)
+  M <- max(x)
+  x <- (x - m)/(M - m)
+  return(x)
+}
+
+dt <- data %>% mutate(across("MORTDUE", ZeroOne))
+
+## all numeric variable
+# data %>% mutate(across(where(is.numeric), ~ (.x - min(.x))/max(.x), .names = "Scale_{col}"))
+```
+```{r}
+library(ggcorrplot)
+##Correlation Matrix
+numericVarName <- names(which(sapply(data, is.numeric)))
+corr <- cor(data[,numericVarName], use = 'pairwise.complete.obs',)
+corr
+#ggcorrplot(corr, lab = TRUE)
+```
+
+## Sử dụng mô hình logit trong chấm điểm tín dụng:
+### Xử lý dữ liệu mất cân bằng
+```{r over sampling}
+#--- pp Oversampling----
+library('InformationValue')
+library('ROSE')
+data$BAD <- as.numeric(as.character(data$BAD))
+data.over <- ovun.sample(BAD ~., data = data, p = 0.5, seed = 1, method="over")$data
+table(data.over$BAD)
+```
+
+### Lựa chọn biến:
+Thực hiện kiểm định khi bình phương với các biến định tính:
+```{r Chi square}
+library(MASS)
+chi.square <- vector()
+p.value <- vector()
+cateVar <- data %>% 
+  dplyr::select(-BAD) %>% 
+  keep(is.factor)
+
+  for (i in 1:length(cateVar)) {
+    tbl <- table(data$BAD, unname(unlist(cateVar[i])))
+    csq.test <- chisq.test(tbl, correct = FALSE)
+    p.value[i] <- csq.test[3]$p.value
+    chi.square[i] <- unname(csq.test[1]$statistic)
+  }
+
+chi_square_test <- tibble(variable = names(cateVar)) %>% 
+  add_column(chi.square = chi.square) %>% 
+  add_column(p.value = p.value)
+# knitr::kable(chi_square_test)
+chi_square_test
+```
+### Chia tập dữ liệu train và test:
+```{r train - test data}
+# train 70% - test 30%
+set.seed(1230000)
+ind <- sample(2, nrow(df), replace = TRUE, prob = c(0.7, 0.3))
+train.data <- df [ind == 1, ]
+test.data<- df [ind == 2, ]
+```
+
+Tính chỉ số IV của các biến trên tập train
+```{r}
+##------Information Value
+IV <- Information::create_infotables(data = train.data, y = "BAD", parallel = FALSE)
+print(IV$Summary)
+```
+Loại các biến có IV nhỏ hơn 0.02
+```{r}
+# select vars of IV < 0.02
+vars_removed <- IV$Summary %>% as.data.frame %>% 
+                                    subset(IV < 0.02) %>% pull(1)
+vars_removed
+```
+```{r}
+f.data<- data %>% dplyr::select(-all_of(vars_removed))
+```
+
+```{r}
+# train 70% - test 30%
+f.train.data <-train.data%>% dplyr::select(-all_of(vars_removed))
+f.test.data <- test.data %>% dplyr::select(-all_of(vars_removed))
+```
+### Bin các biến theo woe:
+```{r Bin woe}
+library("scorecard")
+bins <- woebin(f.train.data, y = "BAD")
+woebin_plot(bins)
+```
+### Chạy mô hình logit:
+
+- Thực hiện trên tập train:
+```{r logit}
+f.train.data_woe <- woebin_ply(f.train.data, bins)
+logit.model <- glm(BAD ~., family = binomial(link = 'logit'), data = f.train.data_woe)
+summary(logit.model)
+```
+```{r logit}
+train.step <- step(logit.model, direction = "backward", trace = 0)
+summary(train.step)
+```
+- Kiểm tra mô hình trên tập train:
+```{r check over on train}
+train.prob <- predict(train.step, type = "response")
+train.pred <- ifelse(train.prob > .5, "1", "0")
+table(train.pred, f.train.data$BAD)
+```
+
+- Thực hiện mô hình trên tập test:
+```{r Bin on test}
+f.test.data_woe <- woebin_ply(f.test.data, bins)
+logit.pred.prob_woe <- predict(logit.model, f.test.data_woe, type = 'response')
+logit.pred_woe <- as.factor(ifelse(logit.pred.prob_woe > 0.5, 1, 0))
+f.test.data_woe$BAD <- as.factor(f.test.data_woe$BAD)
+### validation
+caret::confusionMatrix(logit.pred_woe, f.test.data_woe$BAD, positive = "1")
+```
+```{r}
+library("scorecard")
+# Model Performance for test data: 
+perf_eva(pred = logit.pred.prob_woe, label = f.test.data$BAD, 
+         type = c("ks", "lift", "roc", "pr"), 
+         show_plot = c("ks", "lift", "roc", "pr"),
+         title = "Test Data")
+```
+
+
+### Thực hiện tính score:
+```{r}
+# Calculate scorecard scores for variables based on the results from woebin and glm: 
+my_card <- scorecard(bins, logit.model, points0 = 600, odds0 = 1/19, pdo = 50)
+head(my_card)
+```
+
+## Show Results: 
+```{r scorecard}
+# Calculate scorecard scores
+head(logit.pred.prob_woe,10)
+score<-log(logit.pred.prob_woe/(1-logit.pred.prob_woe))
+head(score,10)
+hist(score)
+```
+
+## scalling Factor=50/(log???(2))72.13 &  Offset" =500-50*(log???(100))/(log???(2))=167.82
+```{r scorecard}
+credit_score <-72.13-168.09*score
+hist(credit_score)
+head(credit_score,10)
+head(score,10)
+```
+
+Thống kê score trên tập test:
+```{r scorecard}
+# install.packages("kableExtra")
+library(kableExtra)
+# Calculate scores for variables based on the results from woebin and glm: 
+my_card <- scorecard(bins, logit, points0 = 600, odds0 = 1/19, pdo = 50)
+
+# Scorecard Points for test data set: 
+my_points_test <- scorecard_ply(f.test.data, my_card, print_step = 0, 
+                                only_total_score = FALSE) %>% as.data.frame()
+
+df_scored_test <- f.test.data %>% 
+  mutate(SCORE = my_points_test$score) %>% 
+  mutate(Prediction = case_when(BAD == 1 ~ "Fraud", TRUE ~ "NonFraud")) 
+
+df_scored_test %>% 
+  group_by(Prediction) %>% 
+  summarise_each(funs(min, max, median, mean, n()), SCORE) %>% 
+  mutate_if(is.numeric, function(x) {round(x, 0)}) %>% 
+  knitr::kable(caption = "Scorecad Points by Group for Test Data (Selection based on IV)",
+               booktabs = TRUE,
+               linesep = "")
+```
+
+```{r scorecard}
+write.csv(Credit_score,"credit_score.csv")
+write.csv(score,"score.csv")
+```
+
+
+```{r}
+df_scored_test %>% 
+  group_by(Prediction) %>% 
+  summarise(tb = mean(SCORE), .groups = 'drop') -> mean_score_test
+
+df_scored_test %>% 
+  ggplot(aes(SCORE, color = Prediction, fill = Prediction)) + 
+  geom_density(alpha = 0.3) + 
+  geom_vline(aes(xintercept = mean_score_test$tb[1]), linetype = "dashed", color = "red") + 
+  geom_vline(aes(xintercept = mean_score_test$tb[2]), linetype = "dashed", color = "blue") + 
+  geom_text(aes(x = mean_score_test$tb[1] - 10, y = 0.005, label = mean_score_test$tb[1] %>% round(0)), color = "red", size = 4) + 
+  geom_text(aes(x = mean_score_test$tb[2] + 20, y = 0.005, label = mean_score_test$tb[2] %>% round(0)), color = "blue", size = 4) + 
+  theme(legend.title = element_blank()) + 
+  theme(legend.position = c(0.2, 0.8)) + 
+  theme(plot.margin = unit(c(1, 1, 1, 1), "cm")) + 
+  labs(x = NULL, y = NULL, title = "Scorecard Distribution by two Credit Groups for Test Data", 
+       subtitle = "Variable Selection Used: IV Criterion")
+```
+
